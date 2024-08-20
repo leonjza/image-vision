@@ -2,6 +2,8 @@
 
 Image text recognition experiments. This repo contains two implementations.
 
+![preview](./images/json.png)
+
 - The first is an objective-c program that uses Apples [Vision Framework](https://developer.apple.com/documentation/vision/recognizing-text-in-images?language=objc) to perform OCR.
 - The second is a simple bash script that runs `tesseract` over images in a directory.
 
@@ -97,4 +99,3 @@ Bash, Tesseract Run:
       63 words recognized, writing to ./screenshots/https-zoom.us-tesseract.txt
 ./tesseract.sh ./screenshots  15.77s user 0.63s system 96% cpu 16.973 total
 ```
-
