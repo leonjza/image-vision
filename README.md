@@ -1,8 +1,10 @@
 # image-vision
 
-Image text recognition experiments. This repo contains two implementations.
+Image text recognition experiments.
 
 ![preview](./images/json.png)
+
+This repo contains two implementations.
 
 - The first is an objective-c program that uses Apples [Vision Framework](https://developer.apple.com/documentation/vision/recognizing-text-in-images?language=objc) to perform OCR.
 - The second is a simple bash script that runs `tesseract` over images in a directory.
