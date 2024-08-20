@@ -2,6 +2,16 @@
 #import <Vision/Vision.h>
 #import <AppKit/AppKit.h>
 
+typedef NS_ENUM(NSUInteger, OutputMode) {
+    OutputModeSeparateFiles,
+    OutputModeSingleFile,
+    OutputModeJSON
+};
+
+OutputMode outputMode = OutputModeSeparateFiles;
+NSString *outputFilePath = nil;
+NSMutableDictionary *jsonOutput = nil;
+
 void print(NSString *message) {
     printf("%s\n", [message UTF8String]);
 }
@@ -25,18 +35,6 @@ void processImage(NSString *filePath) {
     // Create a VNImageRequestHandler
     VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cgImage options:@{}];
     
-    // Create the output file path
-    NSString *outputFileName = [[filePath stringByDeletingPathExtension] stringByAppendingString:@"-image-vision.txt"];
-    [[NSFileManager defaultManager] createFileAtPath:outputFileName contents:nil attributes:nil];
-    NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:outputFileName];
-    
-    if (!fileHandle) {
-        print([NSString stringWithFormat:@"Failed to create file at path: %@", outputFileName]);
-        CGImageRelease(cgImage);
-        CFRelease(source);
-        return;
-    }
-    
     // Create a text recognition request
     VNRecognizeTextRequest *textRequest = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:^(VNRequest *request, NSError *error) {
         if (error) {
@@ -44,6 +42,7 @@ void processImage(NSString *filePath) {
             return;
         }
         
+        NSMutableString *recognizedText = [NSMutableString string];
         NSUInteger wordCount = 0;
         
         for (VNRecognizedTextObservation *observation in request.results) {
@@ -54,17 +53,36 @@ void processImage(NSString *filePath) {
             // Extract the top candidate text
             VNRecognizedText *topCandidate = [observation topCandidates:1].firstObject;
             if (topCandidate) {
-                // Write the recognized text directly to the file
-                NSString *textToWrite = [topCandidate.string stringByAppendingString:@" "];
-                [fileHandle writeData:[textToWrite dataUsingEncoding:NSUTF8StringEncoding]];
-                
-                // Increment word count
+                [recognizedText appendFormat:@"%@ ", topCandidate.string];
                 wordCount += [[topCandidate.string componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] count];
             }
         }
         
-        // Print the word count and output file path
-        print([NSString stringWithFormat:@"%8lu words recognized, writing to %@", (unsigned long)wordCount, outputFileName]);
+        // Output the recognized text based on the selected mode
+        if (outputMode == OutputModeSeparateFiles) {
+            NSString *outputFileName = [[filePath stringByDeletingPathExtension] stringByAppendingString:@"-image-vision.txt"];
+            [[NSFileManager defaultManager] createFileAtPath:outputFileName contents:nil attributes:nil];
+            NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:outputFileName];
+            if (fileHandle) {
+                print([NSString stringWithFormat:@"%8lu words recognized, writing to %@", (unsigned long)wordCount, outputFileName]);
+                [fileHandle writeData:[recognizedText dataUsingEncoding:NSUTF8StringEncoding]];
+                [fileHandle closeFile];
+            } else {
+                print([NSString stringWithFormat:@"Failed to create file at path: %@", outputFileName]);
+            }
+        } else if (outputMode == OutputModeSingleFile) {
+            NSString *outputString = [NSString stringWithFormat:@"\n%@\n%@\n", [filePath lastPathComponent], recognizedText];
+            NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:outputFilePath];
+            if (fileHandle) {
+                [fileHandle seekToEndOfFile];
+                [fileHandle writeData:[outputString dataUsingEncoding:NSUTF8StringEncoding]];
+                [fileHandle closeFile];
+            } else {
+                print([NSString stringWithFormat:@"Failed to write to file: %@", outputFilePath]);
+            }
+        } else if (outputMode == OutputModeJSON) {
+            jsonOutput[[filePath lastPathComponent]] = [recognizedText stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        }
     }];
     
     // Set recognition languages and options
@@ -79,7 +97,6 @@ void processImage(NSString *filePath) {
     }
     
     // Clean up
-    [fileHandle closeFile];
     CGImageRelease(cgImage);
     CFRelease(source);
 }
@@ -108,23 +125,46 @@ void scanDirectoryForSupportedImages(NSString *directoryPath) {
     }
 }
 
-
 int main(int argc, const char * argv[]) {
     @autoreleasepool {
         if (argc < 2) {
             NSString *binaryName = [[NSProcessInfo processInfo] processName];
-            NSLog(@"Usage: %@ /path/to/your/directory/of/images", binaryName);
+            NSString *usage = [NSString stringWithFormat:@"Usage: %@ /path/to/your/directory/of/images [--single-file output.txt] [--json output.json]", binaryName];
+            print(usage);
             return -1;
         }
         
         NSString *directoryPath = [NSString stringWithUTF8String:argv[1]];
         BOOL isDirectory;
         if (![[NSFileManager defaultManager] fileExistsAtPath:directoryPath isDirectory:&isDirectory] || !isDirectory) {
-            NSLog(@"The provided path is not a valid directory.");
+            print(@"The provided path is not a valid directory.");
             return -1;
         }
         
+        // Handle command-line arguments for output mode
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--single-file") == 0 && i + 1 < argc) {
+                outputMode = OutputModeSingleFile;
+                outputFilePath = [NSString stringWithUTF8String:argv[i + 1]];
+                [[NSFileManager defaultManager] createFileAtPath:outputFilePath contents:nil attributes:nil];
+                i++; // Skip the next argument since it's the file path
+            } else if (strcmp(argv[i], "--json") == 0 && i + 1 < argc) {
+                outputMode = OutputModeJSON;
+                outputFilePath = [NSString stringWithUTF8String:argv[i + 1]];
+                jsonOutput = [NSMutableDictionary dictionary];
+                i++; // Skip the next argument since it's the file path
+            }
+        }
+
+        // Scan the directory for images and process them
         scanDirectoryForSupportedImages(directoryPath);
+
+        // If in JSON mode, write the output to the specified file
+        if (outputMode == OutputModeJSON && jsonOutput) {
+            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:jsonOutput options:NSJSONWritingPrettyPrinted error:nil];
+            [jsonData writeToFile:outputFilePath atomically:YES];
+            print([NSString stringWithFormat:@"JSON output written to %@", outputFilePath]);
+        }
     }
     return 0;
 }
